@@ -283,7 +283,16 @@
                          depth-limit))
          ;; exchange rates calculation parameters
          (price-fn (gnc:case-price-fn price-source report-commodity to-date))
-         (exchange-fn (gnc:case-exchange-fn price-source report-commodity to-date)))
+         (exchange-fn (gnc:case-exchange-fn price-source report-commodity to-date))
+         ;; when price-source is 'pricedb-nearest-txn, converts each
+         ;; account's splits at the price nearest to EACH SPLIT'S OWN
+         ;; date instead of the report-date lump conversion above;
+         ;; otherwise #f.
+         (per-txn-balance-fn
+          (gnc:make-per-txn-get-balance-fn
+           price-source report-commodity
+           (gnc:accounts-get-commodities accounts report-commodity)
+           to-date)))
 
     (gnc:html-document-set-title!
      doc
@@ -325,15 +334,16 @@
                                               'omit-leaf-acct))
                  (list 'account-label-mode (if use-links? 'anchor 'name))
                  (list 'get-balance-fn
-                       (and sx?
-                            (lambda (account start-date end-date)
-                              (let* ((guid (gncAccountGetGUID account))
-                                     (num (hash-ref sx-value-hash guid)))
-                                (if num
-                                    (gnc:monetaries-add
-                                     (gnc:make-gnc-monetary
-                                      (xaccAccountGetCommodity account) num))
-                                    (gnc:make-commodity-collector))))))))
+                       (or per-txn-balance-fn
+                           (and sx?
+                                (lambda (account start-date end-date)
+                                  (let* ((guid (gncAccountGetGUID account))
+                                         (num (hash-ref sx-value-hash guid)))
+                                    (if num
+                                        (gnc:monetaries-add
+                                         (gnc:make-gnc-monetary
+                                          (xaccAccountGetCommodity account) num))
+                                        (gnc:make-commodity-collector)))))))))
                (params
                 (list
                  (list 'parent-account-balance-mode parent-mode)

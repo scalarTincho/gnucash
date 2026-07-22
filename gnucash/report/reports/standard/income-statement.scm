@@ -345,7 +345,37 @@
          ;; exchange rates calculation parameters
          (exchange-fn
           (gnc:case-exchange-fn price-source report-commodity end-date))
-         (price-fn (gnc:case-price-fn price-source report-commodity end-date)))
+         (price-fn (gnc:case-price-fn price-source report-commodity end-date))
+         ;; when price-source is 'pricedb-nearest-txn, this converts
+         ;; a monetary at the price nearest to a GIVEN date (as
+         ;; opposed to exchange-fn above, which is always at
+         ;; end-date); used below both for the per-account rows
+         ;; (get-balance-fn) and for the revenue/expense/trading
+         ;; totals, so both stay consistent with each other.
+         (exchange-time-fn
+          (and (eq? price-source 'pricedb-nearest-txn)
+               (gnc:case-exchange-time-fn
+                price-source report-commodity
+                (gnc:accounts-get-commodities accounts report-commodity)
+                end-date 0 0)))
+         ;; Per-account get-balance-fn. This report's table-env uses
+         ;; 'balance-mode 'pre-closing (closing entries excluded from
+         ;; the displayed rows), so — to keep the rows consistent with
+         ;; the revenue/expense/trading totals below, which perform
+         ;; the same subtraction — this excludes closing-entry splits
+         ;; too, rather than using the simpler
+         ;; gnc:account-get-converted-balance-interval wrapper (which
+         ;; includes everything).
+         (per-txn-balance-fn
+          (and exchange-time-fn
+               (lambda (account acct-start-date acct-end-date)
+                 (gnc:collector-
+                  (gnc:account-get-trans-type-converted-balance-interval
+                   (list account) #f acct-start-date acct-end-date
+                   exchange-time-fn report-commodity)
+                  (gnc:account-get-trans-type-converted-balance-interval
+                   (list account) closing-pattern acct-start-date acct-end-date
+                   exchange-time-fn report-commodity))))))
 
     ;; Wrapper to call gnc:html-table-add-labeled-amount-line!
     ;; with the proper arguments.
@@ -382,24 +412,52 @@
          doc (gnc:html-make-no-account-warning
               reportname (gnc:report-id report-obj)))
 
-        ;; Get all the balances for each of the account types.
+        ;; Get all the balances for each of the account types. When
+        ;; exchange-time-fn is active (price-source is
+        ;; 'pricedb-nearest-txn), each split is converted at ITS OWN
+        ;; transaction date via
+        ;; gnc:account-get-trans-type-converted-balance-interval,
+        ;; mirroring the same all-splits-minus-closing-splits
+        ;; arithmetic as the native-currency case below so the totals
+        ;; stay consistent with the per-account rows (which use the
+        ;; same exchange-time-fn through per-txn-balance-fn).
         (let* ((expense-total
-                (gnc:collector-
-                 (gnc:accountlist-get-comm-balance-interval-with-closing
-                  expense-accounts start-date end-date)
-                 (gnc:account-get-trans-type-balance-interval-with-closing
-                  expense-accounts closing-pattern start-date end-date)))
+                (if exchange-time-fn
+                    (gnc:collector-
+                     (gnc:account-get-trans-type-converted-balance-interval
+                      expense-accounts #f start-date end-date
+                      exchange-time-fn report-commodity)
+                     (gnc:account-get-trans-type-converted-balance-interval
+                      expense-accounts closing-pattern start-date end-date
+                      exchange-time-fn report-commodity))
+                    (gnc:collector-
+                     (gnc:accountlist-get-comm-balance-interval-with-closing
+                      expense-accounts start-date end-date)
+                     (gnc:account-get-trans-type-balance-interval-with-closing
+                      expense-accounts closing-pattern start-date end-date))))
 
                (revenue-total
-                (gnc:collector-
-                 (gnc:account-get-trans-type-balance-interval-with-closing
-                  revenue-accounts closing-pattern start-date end-date)
-                 (gnc:accountlist-get-comm-balance-interval-with-closing
-                  revenue-accounts start-date end-date)))
+                (if exchange-time-fn
+                    (gnc:collector-
+                     (gnc:account-get-trans-type-converted-balance-interval
+                      revenue-accounts closing-pattern start-date end-date
+                      exchange-time-fn report-commodity)
+                     (gnc:account-get-trans-type-converted-balance-interval
+                      revenue-accounts #f start-date end-date
+                      exchange-time-fn report-commodity))
+                    (gnc:collector-
+                     (gnc:account-get-trans-type-balance-interval-with-closing
+                      revenue-accounts closing-pattern start-date end-date)
+                     (gnc:accountlist-get-comm-balance-interval-with-closing
+                      revenue-accounts start-date end-date))))
 
                (trading-total
-                (gnc:accountlist-get-comm-balance-interval-with-closing
-                 trading-accounts start-date end-date))
+                (if exchange-time-fn
+                    (gnc:account-get-trans-type-converted-balance-interval
+                     trading-accounts #f start-date end-date
+                     exchange-time-fn report-commodity)
+                    (gnc:accountlist-get-comm-balance-interval-with-closing
+                     trading-accounts start-date end-date)))
 
                (net-income
                 (gnc:collector+ revenue-total
@@ -415,6 +473,7 @@
                  (list 'depth-limit-behavior (if bottom-behavior 'flatten 'summarize))
                  (list 'report-commodity report-commodity)
                  (list 'exchange-fn exchange-fn)
+                 (list 'get-balance-fn per-txn-balance-fn)
                  (list 'parent-account-subtotal-mode parent-total-mode)
                  (list 'zero-balance-mode
                        (if show-zb-accts? 'show-leaf-acct 'omit-leaf-acct))

@@ -311,7 +311,18 @@
          (price-fn (gnc:case-price-fn price-source report-commodity reportdate))
          ;; exchange rates calculation parameters
          (exchange-fn
-          (gnc:case-exchange-fn price-source report-commodity reportdate)))
+          (gnc:case-exchange-fn price-source report-commodity reportdate))
+         ;; when price-source is 'pricedb-nearest-txn, this returns a
+         ;; get-balance-fn that converts each account's splits at the
+         ;; price nearest to EACH SPLIT'S OWN date (rather than
+         ;; converting the summed native balance at reportdate);
+         ;; otherwise #f, leaving the existing report-date conversion
+         ;; via exchange-fn untouched.
+         (per-txn-balance-fn
+          (gnc:make-per-txn-get-balance-fn
+           price-source report-commodity
+           (gnc:accounts-get-commodities accounts report-commodity)
+           reportdate)))
 
     ;; Wrapper to call gnc:html-table-add-labeled-amount-line!
     ;; with the proper arguments.
@@ -334,13 +345,27 @@
       (gnc:html-table-append-ruler! table (* 2 tree-depth)))
 
     ;; Return a commodity collector containing the sum of the balance of all of
-    ;; the accounts on acct-list as of the time given in reportdate
+    ;; the accounts on acct-list as of the time given in reportdate.
+    ;; When per-txn-balance-fn is active (price-source is
+    ;; 'pricedb-nearest-txn), each account's splits are converted at
+    ;; their own transaction dates and merged directly (the collector
+    ;; ends up denominated only in report-commodity), keeping the
+    ;; subtotal/total lines consistent with the per-account rows shown
+    ;; in the tables above, which use the same get-balance-fn. Falls
+    ;; back to the usual lifetime-balance-as-of-date otherwise.
     (define (account-list-balance acct-list reportdate)
-      (define (acc->balance acc)
-        (gnc:make-gnc-monetary
-         (xaccAccountGetCommodity acc)
-         (xaccAccountGetBalanceAsOfDate acc reportdate)))
-      (apply gnc:monetaries-add (map acc->balance acct-list)))
+      (if per-txn-balance-fn
+          (let ((coll (gnc:make-commodity-collector)))
+            (for-each
+             (lambda (acc) (coll 'merge (per-txn-balance-fn acc #f reportdate) #f))
+             acct-list)
+            coll)
+          (let ((acc->balance
+                 (lambda (acc)
+                   (gnc:make-gnc-monetary
+                    (xaccAccountGetCommodity acc)
+                    (xaccAccountGetBalanceAsOfDate acc reportdate)))))
+            (apply gnc:monetaries-add (map acc->balance acct-list)))))
 
     ;; Format the liabilities section of the report
     (define (add-liability-block
@@ -422,6 +447,7 @@
                  (list 'depth-limit-behavior (if bottom-behavior 'flatten 'summarize))
                  (list 'report-commodity report-commodity)
                  (list 'exchange-fn exchange-fn)
+                 (list 'get-balance-fn per-txn-balance-fn)
                  (list 'parent-account-subtotal-mode parent-total-mode)
                  (list 'zero-balance-mode
                        (if show-zb-accts? 'show-leaf-acct 'omit-leaf-acct))

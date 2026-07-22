@@ -44,6 +44,7 @@
   (test-get-exchange-cost-totals-trading)
   (test-exchange-by-pricedb-latest)
   (test-exchange-by-pricedb-nearest)
+  (test-account-get-converted-balance-interval)
   (test-get-commodity-totalavg-prices)
   (test-get-commodity-inst-prices)
   (test-weighted-average)
@@ -519,6 +520,71 @@
                              (gnc:make-gnc-monetary IBM 1) USD
                              (gnc-dmy2time64 1 7 2014))))
      (test-end "multiple"))
+   (teardown)))
+
+;; Regression test for the "Nearest to transaction date"
+;; (pricedb-nearest-txn) feature: gnc:account-get-converted-balance-interval
+;; and gnc:make-per-txn-get-balance-fn (commodity-utilities.scm) must
+;; convert EACH split at the pricedb price nearest to THAT split's own
+;; date, not the report's end date.
+;;
+;; ibm-a buys 200 IBM on 15/1/2012 and sells all 200 on 8/8/2014, so
+;; its NATIVE (share) balance at any date on/after 8/8/2014 is exactly
+;; 0. Any point-in-time conversion (converting the ending balance at a
+;; single date) would therefore always report $0 here, regardless of
+;; price -- a bug that accidentally used a single date for both splits
+;; would silently reproduce that same $0. The historical/per-txn
+;; approach instead sums the ACTUAL dollar amount paid and received at
+;; each transaction's own nearest price, which is nonzero: this test
+;; asserts that nonzero, hand-computed value.
+;;
+;; NOTE: env-transfer-foreign (test-engine-extras.scm) automatically
+;; registers a pricedb entry AT each transaction's own date, using
+;; that transaction's own implied per-share rate (in addition to the
+;; explicit gnc-pricedb-create prices used elsewhere in this file). So
+;; "nearest to the split's own date" finds that zero-distance,
+;; transaction-implied price rather than one of the explicit ones:
+;;   - 15/1/2012 buy: 200 shares @ its own implied rate $179.16
+;;     (=3583200/100 / 200) -> $35832.00
+;;   - 8/8/2014 sell: -200 shares @ its own implied rate $186.63
+;;     (=-3732600/100 / -200) -> -$37326.00
+;;   - 8/8/2014 G/L: 0 shares (no price registered; amount 0) -> $0.00
+;; Expected: 35832.00 - 37326.00 + 0.00 = -$1494.00
+(define (test-account-get-converted-balance-interval)
+  (test-group-with-cleanup "gnc:account-get-converted-balance-interval"
+   (let* ((account-alist (setup #f))
+         (book  (gnc-get-current-book))
+         (comm-table (gnc-commodity-table-get-table book))
+         (USD (gnc-commodity-table-lookup comm-table "CURRENCY" "USD"))
+         (IBM (gnc-commodity-table-lookup comm-table "NYSE" "IBM"))
+         (ibm-a (cdr (assoc "IBM-A" account-alist)))
+         (end-date (gnc-dmy2time64 9 8 2014))
+         (exchange-time-fn (gnc:case-exchange-time-fn
+                             'pricedb-nearest-txn USD (list IBM USD)
+                             end-date 0 0)))
+     (test-begin "per-txn historical conversion")
+     (test-equal "ibm-a native (share) balance is 0 after selling all shares"
+                 0
+                 (gnc:account-get-balance-interval ibm-a #f end-date #f))
+     (test-equal "ibm-a historical-cost USD balance is -$1494.00, not $0"
+                 -149400/100
+                 (cadr ((gnc:account-get-converted-balance-interval
+                         ibm-a #f end-date exchange-time-fn USD)
+                        'getpair USD #f)))
+     (test-end "per-txn historical conversion")
+     (test-begin "gnc:make-per-txn-get-balance-fn")
+     (test-assert "returns #f for non-pricedb-nearest-txn price-source"
+                  (not (gnc:make-per-txn-get-balance-fn
+                        'pricedb-nearest USD (list IBM USD) end-date)))
+     (let ((get-balance-fn (gnc:make-per-txn-get-balance-fn
+                            'pricedb-nearest-txn USD (list IBM USD) end-date)))
+       (test-assert "returns a procedure for pricedb-nearest-txn"
+                    (procedure? get-balance-fn))
+       (test-equal "matches gnc:account-get-converted-balance-interval directly"
+                   -149400/100
+                   (cadr ((get-balance-fn ibm-a #f end-date)
+                          'getpair USD #f))))
+     (test-end "gnc:make-per-txn-get-balance-fn"))
    (teardown)))
 
 (define (test-get-commodity-totalavg-prices)

@@ -54,6 +54,7 @@
 (export gnc:exchange-by-pricealist-nearest)
 (export gnc:case-exchange-fn)
 (export gnc:case-exchange-time-fn)
+(export gnc:make-per-txn-get-balance-fn)
 (export gnc:case-price-fn)
 (export gnc:sum-collector-commodity)
 (export gnc:uniform-commodity?)
@@ -780,6 +781,16 @@
     ((pricedb-nearest) (lambda (foreign domestic)
                          (gnc:exchange-by-pricedb-nearest
                           foreign domestic to-date-tp)))
+    ;; 'pricedb-nearest-txn is meant to convert each transaction at
+    ;; the price nearest to ITS OWN date (see
+    ;; gnc:case-exchange-time-fn below, and the per-account
+    ;; get-balance-fn helpers in report-utilities.scm that actually
+    ;; do the per-transaction conversion). Here, where only a single
+    ;; to-date is available (e.g. for a totals/grand-total line),
+    ;; fall back to the same behaviour as 'pricedb-nearest.
+    ((pricedb-nearest-txn) (lambda (foreign domestic)
+                             (gnc:exchange-by-pricedb-nearest
+                              foreign domestic to-date-tp)))
     (else
      (begin
        ;; FIX-ME
@@ -867,6 +878,12 @@
     ((pricedb-latest) (lambda (foreign domestic date)
                         (gnc:exchange-by-pricedb-latest foreign domestic)))
     ((pricedb-nearest) gnc:exchange-by-pricedb-nearest)
+    ;; Same lookup as 'pricedb-nearest, but here `date` is each
+    ;; split/transaction's own posting date (this dispatcher is
+    ;; time-aware), so callers that pass per-transaction dates (the
+    ;; Transaction Report, Cash Flow, and the new per-txn
+    ;; get-balance-fn helpers) get true historical-rate conversion.
+    ((pricedb-nearest-txn) gnc:exchange-by-pricedb-nearest)
     (else
      (begin
        (gnc:warn "gnc:case-exchange-time-fn: bad price-source value: "
@@ -875,6 +892,37 @@
        ;; unimplemented source-option comes through
        gnc:exchange-by-pricedb-nearest))))
 
+;; Factory for a per-account get-balance-fn (as consumed by
+;; gnc:html-table-add-account-balances / gnc:make-html-acct-table via
+;; the table-env's 'get-balance-fn entry) that converts EACH split of
+;; the account at the price nearest to that split's OWN transaction
+;; date, using the price database (see gnc:exchange-by-pricedb-nearest
+;; and gnc:account-get-converted-balance-interval), rather than
+;; converting the account's already-summed native-currency balance at
+;; a single report date.
+;;
+;; Returns #f when price-source isn't 'pricedb-nearest-txn, so
+;; callers can simply do:
+;;   (or (gnc:make-per-txn-get-balance-fn ...) existing-get-balance-fn)
+;;
+;; arguments:
+;; price-source: the report's chosen price-source symbol
+;; report-currency: the target commodity
+;; commodity-list: commodities appearing in the accounts being
+;;                 reported on (passed through to
+;;                 gnc:case-exchange-time-fn; only consulted by the
+;;                 average-cost/weighted-average branches, which are
+;;                 irrelevant here but kept for signature parity)
+;; to-date-tp: report's end date (time64)
+(define (gnc:make-per-txn-get-balance-fn
+         price-source report-currency commodity-list to-date-tp)
+  (and (eq? price-source 'pricedb-nearest-txn)
+       (let ((exchange-time-fn
+              (gnc:case-exchange-time-fn
+               price-source report-currency commodity-list to-date-tp 0 0)))
+         (lambda (account start-date end-date)
+           (gnc:account-get-converted-balance-interval
+            account start-date end-date exchange-time-fn report-currency)))))
 
 
 

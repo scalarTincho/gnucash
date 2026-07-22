@@ -69,6 +69,8 @@
 (export gnc:accounts-get-comm-total-assets)
 (export gnc:account-get-balance-interval)
 (export gnc:account-get-comm-balance-interval)
+(export gnc:account-get-converted-balance-interval)
+(export gnc:account-get-trans-type-converted-balance-interval)
 (export gnc:accountlist-get-comm-balance-interval)
 (export gnc:accountlist-get-comm-balance-interval-with-closing)
 (export gnc:accountlist-get-comm-balance-at-date)
@@ -596,6 +598,50 @@
     (gnc:account-get-trans-type-balance-interval
      (cons account (or (and include-children? sub-accts) '()))
      #f from to)))
+
+;; Like gnc:account-get-trans-type-balance-interval-with-closing, but
+;; every matching split is immediately converted to report-currency
+;; using exchange-time-fn (a 3-arg function: foreign-monetary
+;; domestic-commodity date -> gnc-monetary, e.g. as returned by
+;; gnc:case-exchange-time-fn in (gnucash report commodity-utilities)),
+;; applied at THAT SPLIT'S OWN transaction date rather than at a
+;; single report date. `type` follows the same convention as
+;; gnc:account-get-trans-type-splits-interval: an alist that may
+;; include a 'closing key (#t: only closing txns, #f: only
+;; non-closing txns, omitted/#f overall: both), used to build
+;; "historical rate per transaction" reports (e.g. Income Statement's
+;; pre-closing revenue/expense totals). The result is a
+;; commodity-collector already denominated (only) in report-currency,
+;; so it can be dropped straight into a get-balance-fn hook, added to
+;; other converted collectors, or passed through
+;; gnc:sum-collector-commodity with any exchange-fn (which becomes a
+;; no-op via gnc:exchange-if-same).
+(define (gnc:account-get-trans-type-converted-balance-interval
+         account-list type start-date end-date exchange-time-fn report-currency)
+  (let ((coll (gnc:make-commodity-collector)))
+    (for-each
+     (lambda (split)
+       (let* ((txn-date (xaccTransGetDate (xaccSplitGetParent split)))
+              (acct-commodity (xaccAccountGetCommodity (xaccSplitGetAccount split)))
+              (foreign-mon (gnc:make-gnc-monetary
+                            acct-commodity (xaccSplitGetAmount split)))
+              (converted (exchange-time-fn foreign-mon report-currency txn-date)))
+         (if (gnc:gnc-monetary? converted)
+             (coll 'add report-currency (gnc:gnc-monetary-amount converted))
+             (gnc:warn "gnc:account-get-trans-type-converted-balance-interval: "
+                       "could not convert split, ignoring; date=" txn-date))))
+     (gnc:account-get-trans-type-splits-interval
+      account-list type start-date end-date))
+    coll))
+
+;; Single-account convenience wrapper (type=#f, i.e. every split,
+;; closing entries included) for use as a get-balance-fn (see
+;; html-acct-table.scm / gnc:make-per-txn-get-balance-fn in
+;; commodity-utilities.scm), whose signature is (account start end).
+(define (gnc:account-get-converted-balance-interval
+         account from to exchange-time-fn report-currency)
+  (gnc:account-get-trans-type-converted-balance-interval
+   (list account) #f from to exchange-time-fn report-currency))
 
 ;; This calculates the increase in the balance(s) of all accounts in
 ;; <accountlist> over the period from <from-date> to <to-date>.

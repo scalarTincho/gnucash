@@ -141,6 +141,7 @@
           (vector 'weighted-average (N_ "Weighted average of all transactions in the past"))
           (vector 'pricedb-before (N_ "Last up through report date"))
           (vector 'pricedb-nearest (N_ "Closest to report date"))
+          (vector 'pricedb-nearest-txn (N_ "Nearest to transaction date"))
           (vector 'pricedb-latest (N_ "Most recent")))))
 
 ;; The width- and height- options for charts
