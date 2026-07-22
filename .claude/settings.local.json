@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git remote *)",
+      "Bash(python3 /c/Users/marti/AppData/Local/Temp/claude/C--Users-marti-Scalar-Dropbox-Martin-Peretti-Ricart-Oficina-Referencia-y-training-Martin-Python-Gnucash/da462089-85fd-4b57-b442-d2e286ace68d/scratchpad/paren_check.py gnucash/report/options-utilities.scm gnucash/report/commodity-utilities.scm gnucash/report/report-utilities.scm gnucash/report/reports/standard/balance-sheet.scm gnucash/report/reports/standard/account-summary.scm gnucash/report/reports/standard/income-statement.scm)",
+      "Bash(/c/Users/marti/msys64/usr/bin/bash.exe -lc 'pacman -Ss gnucash 2>&1; echo \"---guile---\"; pacman -Ss \"mingw-w64-x86_64-guile\" 2>&1 | head -10')",
+      "Bash(/c/Users/marti/msys64/usr/bin/bash.exe -lc ' *)",
+      "Bash(wsl -d Ubuntu -u root -- bash -lc 'whoami && apt-get update 2>&1 | tail -10')",
+      "Bash(wsl -d Ubuntu -- bash -lc ' *)",
+      "Bash(wsl -d Ubuntu -u root -- bash -lc 'DEBIAN_FRONTEND=noninteractive apt-get install -y libxslt1-dev 2>&1 | tail -15')",
+      "Bash(wsl -d Ubuntu -u root -- bash -lc ' *)",
+      "Bash(wsl -d Ubuntu -u root -- bash -lc 'DEBIAN_FRONTEND=noninteractive apt-get install -y swig 2>&1 | tail -10')",
+      "Bash(wsl -d Ubuntu -u root -- bash -lc 'DEBIAN_FRONTEND=noninteractive apt-get install -y xsltproc 2>&1 | tail -10')",
+      "Bash(wsl -d Ubuntu -u root -- bash -lc 'DEBIAN_FRONTEND=noninteractive apt-get install -y libdbi-dev libdbi1 libgtest-dev libgmock-dev 2>&1 | tail -20')",
+      "Bash(wsl -d Ubuntu -- bash -lc 'apt-cache search libdbd 2>&1')",
+      "Bash(wsl -d Ubuntu -u root -- bash -lc 'DEBIAN_FRONTEND=noninteractive apt-get install -y libdbd-sqlite3 2>&1 | tail -10')",
+      "Bash(wsl -d *)"
+    ]
+  }
+}
