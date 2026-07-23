@@ -16,7 +16,9 @@
       "Bash(wsl -d Ubuntu -u root -- bash -lc 'DEBIAN_FRONTEND=noninteractive apt-get install -y libdbd-sqlite3 2>&1 | tail -10')",
       "Bash(wsl -d *)",
       "Bash(git commit -m ' *)",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "Bash(wsl -d Ubuntu -- python3 -c ' *)",
+      "Bash(git add *)"
     ]
   }
 }
