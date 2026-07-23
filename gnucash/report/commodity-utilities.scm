@@ -55,6 +55,7 @@
 (export gnc:case-exchange-fn)
 (export gnc:case-exchange-time-fn)
 (export gnc:make-per-txn-get-balance-fn)
+(export gnc:make-per-txn-price-fn)
 (export gnc:case-price-fn)
 (export gnc:sum-collector-commodity)
 (export gnc:uniform-commodity?)
@@ -923,6 +924,66 @@
          (lambda (account start-date end-date)
            (gnc:account-get-converted-balance-interval
             account start-date end-date exchange-time-fn report-currency)))))
+
+;; Factory for a price-fn (as consumed by gnc:html-make-rates-table, the
+;; small "Exchange Rates" table at the bottom of a report) that reports
+;; the EFFECTIVE, blended rate implied by converting every split of
+;; `accounts` (and their descendants) at ITS OWN transaction date via
+;; gnc:case-exchange-time-fn -- i.e. for each foreign commodity, the
+;; ratio (sum of converted report-currency amounts) / (sum of native
+;; amounts) over [start-date, end-date].
+;;
+;; This exists because gnc:case-price-fn (which every report normally
+;; uses to build price-fn) only ever evaluates a SINGLE date; for
+;; 'pricedb-nearest-txn it falls through to gnc:case-exchange-fn, which
+;; looks up a price nearest the report's end date. When the book's
+;; prices sit at the transaction dates instead (the common case for
+;; this price-source), that single-date lookup can find nothing and
+;; the pricedb layer returns numeric zero -- rendering "$0.00" even
+;; though the report's own per-transaction totals are correct. The
+;; blended rate here is instead the one rate that reconciles those
+;; totals: converted-total / native-total.
+;;
+;; Returns #f when price-source isn't 'pricedb-nearest-txn, so callers
+;; can do (or (gnc:make-per-txn-price-fn ...) (gnc:case-price-fn ...)).
+;;
+;; Note: sums over ALL splits (closing entries included) for
+;; simplicity; where a report's own balances exclude closing entries
+;; (e.g. Income Statement), the blended rate is a close approximation
+;; rather than an exact reconciliation of the displayed totals.
+(define (gnc:make-per-txn-price-fn
+         price-source report-currency accounts start-date end-date)
+  (and (eq? price-source 'pricedb-nearest-txn)
+       (let ((exchange-time-fn
+              (gnc:case-exchange-time-fn
+               price-source report-currency
+               (gnc:accounts-get-commodities accounts report-currency)
+               end-date 0 0))
+             (native (make-hash-table))
+             (converted (make-hash-table)))
+         (for-each
+          (lambda (split)
+            (let* ((commodity (xaccAccountGetCommodity (xaccSplitGetAccount split)))
+                   (amount (xaccSplitGetAmount split))
+                   (txn-date (xaccTransGetDate (xaccSplitGetParent split)))
+                   (conv (exchange-time-fn
+                          (gnc:make-gnc-monetary commodity amount)
+                          report-currency txn-date)))
+              (hash-set! native commodity
+                         (+ amount (hash-ref native commodity 0)))
+              (when (gnc:gnc-monetary? conv)
+                (hash-set! converted commodity
+                           (+ (gnc:gnc-monetary-amount conv)
+                              (hash-ref converted commodity 0))))))
+          (gnc:account-get-trans-type-splits-interval
+           (gnc-accounts-and-all-descendants accounts) #f start-date end-date))
+         (lambda (commodity)
+           (let ((native-total (hash-ref native commodity 0)))
+             (if (zero? native-total)
+                 (gnc-pricedb-get-latest-price
+                  (gnc-pricedb-get-db (gnc-get-current-book))
+                  commodity report-currency)
+                 (/ (hash-ref converted commodity 0) native-total)))))))
 
 
 
