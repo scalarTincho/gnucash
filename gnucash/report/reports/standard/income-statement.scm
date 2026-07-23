@@ -345,7 +345,16 @@
          ;; exchange rates calculation parameters
          (exchange-fn
           (gnc:case-exchange-fn price-source report-commodity end-date))
-         (price-fn (gnc:case-price-fn price-source report-commodity end-date))
+         ;; the Exchange Rates table at the bottom of the report shows
+         ;; price-fn's value for each commodity; when price-source is
+         ;; 'pricedb-nearest-txn, gnc:case-price-fn only ever looks up
+         ;; a price AT end-date, which can be far from where the
+         ;; book's prices actually are and render as $0. Prefer the
+         ;; blended effective rate (converted-total / native-total
+         ;; across the report's accounts and period) when available.
+         (price-fn (or (gnc:make-per-txn-price-fn
+                        price-source report-commodity accounts start-date end-date)
+                       (gnc:case-price-fn price-source report-commodity end-date)))
          ;; when price-source is 'pricedb-nearest-txn, this converts
          ;; a monetary at the price nearest to a GIVEN date (as
          ;; opposed to exchange-fn above, which is always at

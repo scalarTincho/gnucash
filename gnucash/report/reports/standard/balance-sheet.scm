@@ -308,7 +308,16 @@
          (tree-depth (if (eq? depth-limit 'all)
                          (gnc:get-current-account-tree-depth)
                          depth-limit))
-         (price-fn (gnc:case-price-fn price-source report-commodity reportdate))
+         ;; the Exchange Rates table at the bottom of the report shows
+         ;; price-fn's value for each commodity; when price-source is
+         ;; 'pricedb-nearest-txn, gnc:case-price-fn only ever looks up
+         ;; a price AT reportdate, which can be far from where the
+         ;; book's prices actually are and render as $0. Prefer the
+         ;; blended effective rate (converted-total / native-total
+         ;; across all accounts up to reportdate) when available.
+         (price-fn (or (gnc:make-per-txn-price-fn
+                        price-source report-commodity accounts #f reportdate)
+                       (gnc:case-price-fn price-source report-commodity reportdate)))
          ;; exchange rates calculation parameters
          (exchange-fn
           (gnc:case-exchange-fn price-source report-commodity reportdate))
