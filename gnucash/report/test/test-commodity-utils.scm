@@ -45,6 +45,7 @@
   (test-exchange-by-pricedb-latest)
   (test-exchange-by-pricedb-nearest)
   (test-account-get-converted-balance-interval)
+  (test-per-txn-price-fn)
   (test-get-commodity-totalavg-prices)
   (test-get-commodity-inst-prices)
   (test-weighted-average)
@@ -585,6 +586,53 @@
                    (cadr ((get-balance-fn ibm-a #f end-date)
                           'getpair USD #f))))
      (test-end "gnc:make-per-txn-get-balance-fn"))
+   (teardown)))
+
+;; Regression test for gnc:make-per-txn-price-fn, the "Exchange Rates"
+;; table's representative-rate helper for 'pricedb-nearest-txn.
+;;
+;; Case 1 reuses the same ibm-a fixture as
+;; test-account-get-converted-balance-interval above: buying and then
+;; fully selling 200 IBM nets to a native (share) total of exactly
+;; ZERO over the full range, which is precisely the edge case the
+;; function falls back on -- there is no "converted / native" ratio to
+;; compute (0/0), so it must return the latest pricedb price instead
+;; (here, the 1/1/2017 $165.99 price -- the latest of the fixture's
+;; explicit gnc-pricedb-create prices).
+;;
+;; Case 2 restricts the query to just after the 15/1/2012 buy and
+;; before the 8/8/2014 sell, so only the buy split is included: native
+;; total 200 shares, converted total $35832.00 (200 shares at their
+;; own transaction-implied rate of $179.16, per the earlier test's
+;; explanation of env-transfer-foreign's auto-registered prices). The
+;; blended ratio 35832/200 = $179.16 exactly reproduces that rate,
+;; confirming the function performs a real converted-total/native-total
+;; division rather than any single-date lookup.
+(define (test-per-txn-price-fn)
+  (test-group-with-cleanup "gnc:make-per-txn-price-fn"
+   (let* ((account-alist (setup #f))
+          (book  (gnc-get-current-book))
+          (comm-table (gnc-commodity-table-get-table book))
+          (USD (gnc-commodity-table-lookup comm-table "CURRENCY" "USD"))
+          (IBM (gnc-commodity-table-lookup comm-table "NYSE" "IBM"))
+          (ibm-a (cdr (assoc "IBM-A" account-alist)))
+          (full-end-date (gnc-dmy2time64 9 8 2014))
+          (buy-only-end-date (gnc-dmy2time64 2 1 2013)))
+     (test-begin "gnc:make-per-txn-price-fn")
+     (test-assert "returns #f for non-pricedb-nearest-txn price-source"
+                  (not (gnc:make-per-txn-price-fn
+                        'pricedb-nearest USD (list ibm-a) #f full-end-date)))
+     (test-equal "zero net native (bought and fully sold) falls back to latest price"
+                 16599/100
+                 ((gnc:make-per-txn-price-fn
+                   'pricedb-nearest-txn USD (list ibm-a) #f full-end-date)
+                  IBM))
+     (test-equal "buy-only range: blended rate is converted/native = $179.16"
+                 17916/100
+                 ((gnc:make-per-txn-price-fn
+                   'pricedb-nearest-txn USD (list ibm-a) #f buy-only-end-date)
+                  IBM))
+     (test-end "gnc:make-per-txn-price-fn"))
    (teardown)))
 
 (define (test-get-commodity-totalavg-prices)
