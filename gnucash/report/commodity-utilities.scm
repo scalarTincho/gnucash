@@ -927,11 +927,11 @@
 
 ;; Factory for a price-fn (as consumed by gnc:html-make-rates-table, the
 ;; small "Exchange Rates" table at the bottom of a report) that reports
-;; the EFFECTIVE, blended rate implied by converting every split of
-;; `accounts` (and their descendants) at ITS OWN transaction date via
-;; gnc:case-exchange-time-fn -- i.e. for each foreign commodity, the
-;; ratio (sum of converted report-currency amounts) / (sum of native
-;; amounts) over [start-date, end-date].
+;; a representative, ALWAYS-POSITIVE rate implied by converting every
+;; split of `accounts` (and their descendants) at ITS OWN transaction
+;; date via gnc:case-exchange-time-fn -- i.e. for each foreign
+;; commodity, the ratio (sum of |converted report-currency amounts|) /
+;; (sum of |native amounts|) over [start-date, end-date].
 ;;
 ;; This exists because gnc:case-price-fn (which every report normally
 ;; uses to build price-fn) only ever evaluates a SINGLE date; for
@@ -940,17 +940,26 @@
 ;; prices sit at the transaction dates instead (the common case for
 ;; this price-source), that single-date lookup can find nothing and
 ;; the pricedb layer returns numeric zero -- rendering "$0.00" even
-;; though the report's own per-transaction totals are correct. The
-;; blended rate here is instead the one rate that reconciles those
-;; totals: converted-total / native-total.
+;; though the report's own per-transaction totals are correct.
+;;
+;; Weighting by ABSOLUTE VALUE (rather than netting signed amounts) is
+;; deliberate: `accounts` can span multiple account types (assets,
+;; income, expenses, ...), which carry OPPOSITE raw sign conventions
+;; in GnuCash's double-entry representation, and a currency's rate can
+;; vary hugely across a report's date range (e.g. ARS under high
+;; inflation). Netting signed totals first can let unrelated splits
+;; cancel out, leaving a near-zero denominator and a wildly-scaled or
+;; wrongly-signed "rate" as a result. Summing magnitudes instead is
+;; stable regardless of netting, and a currency exchange rate should
+;; never render as negative.
 ;;
 ;; Returns #f when price-source isn't 'pricedb-nearest-txn, so callers
 ;; can do (or (gnc:make-per-txn-price-fn ...) (gnc:case-price-fn ...)).
 ;;
 ;; Note: sums over ALL splits (closing entries included) for
 ;; simplicity; where a report's own balances exclude closing entries
-;; (e.g. Income Statement), the blended rate is a close approximation
-;; rather than an exact reconciliation of the displayed totals.
+;; (e.g. Income Statement), this is a representative rate rather than
+;; an exact reconciliation of the displayed totals.
 (define (gnc:make-per-txn-price-fn
          price-source report-currency accounts start-date end-date)
   (and (eq? price-source 'pricedb-nearest-txn)
@@ -959,8 +968,8 @@
                price-source report-currency
                (gnc:accounts-get-commodities accounts report-currency)
                end-date 0 0))
-             (native (make-hash-table))
-             (converted (make-hash-table)))
+             (native (make-hash-table))       ; comm -> sum of |native amount|
+             (converted (make-hash-table)))   ; comm -> sum of |converted amount|
          (for-each
           (lambda (split)
             (let* ((commodity (xaccAccountGetCommodity (xaccSplitGetAccount split)))
@@ -970,10 +979,10 @@
                           (gnc:make-gnc-monetary commodity amount)
                           report-currency txn-date)))
               (hash-set! native commodity
-                         (+ amount (hash-ref native commodity 0)))
+                         (+ (abs amount) (hash-ref native commodity 0)))
               (when (gnc:gnc-monetary? conv)
                 (hash-set! converted commodity
-                           (+ (gnc:gnc-monetary-amount conv)
+                           (+ (abs (gnc:gnc-monetary-amount conv))
                               (hash-ref converted commodity 0))))))
           (gnc:account-get-trans-type-splits-interval
            (gnc-accounts-and-all-descendants accounts) #f start-date end-date))
@@ -983,7 +992,8 @@
                  (gnc-pricedb-get-latest-price
                   (gnc-pricedb-get-db (gnc-get-current-book))
                   commodity report-currency)
-                 (/ (hash-ref converted commodity 0) native-total)))))))
+                 (gnc-numeric-div (hash-ref converted commodity 0) native-total
+                                  GNC-DENOM-AUTO GNC-RND-ROUND)))))))
 
 
 
